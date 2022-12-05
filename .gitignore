@@ -1,0 +1,6 @@
+private/*
+!private/README.md
+*.traineddata
+node_modules
+out/*
+**/.DS_Store

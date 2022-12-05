@@ -1,0 +1,26 @@
+{
+  "name": "@krist7599555/kbank-ocr",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "module": "2022",
+  "scripts": {
+    "run:pdf": "tsx ./src/main.ts ./private/STM.pdf"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/lodash": "^4.14.191",
+    "cheerio": "1.0.0-rc.12",
+    "fp-ts": "^2.13.1",
+    "json-as-xlsx": "^2.4.6",
+    "lodash": "^4.17.21",
+    "zx": "^7.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^18.11.10",
+    "tsx": "^3.12.1",
+    "typescript": "^4.9.3"
+  }
+}
