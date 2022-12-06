@@ -9,7 +9,7 @@ import { pdftohtml } from "./xpdf";
 import { fs } from "zx";
 import { fp_regex } from "./fp_regex";
 import { pipe } from "fp-ts/lib/function";
-import { array } from "fp-ts";
+import { array, taskEither } from "fp-ts";
 
 const fp_gt = (target: number) => (val: number) => val > target;
 const fp_lt = (target: number) => (val: number) => val < target;
@@ -89,10 +89,10 @@ await fs.remove(outdir).catch(() => {
 await fs
   .mkdir(outdir, { recursive: true })
   .then(() => console.log("mkdir success"));
-const out = await pdftohtml({
+const out = pdftohtml({
   pdf_path: pdf_file_path,
   output_dir: path.resolve(outdir, "html"),
-});
+})();
 
 const REGEX_MONEY = /^\d{1,3}(,\d{3})*\.\d{2}$/;
 const REGEX_MONEY_STR = `\\d{1,3}(,\\d{3})*\\.\\d{2}`;
