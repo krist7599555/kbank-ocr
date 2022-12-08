@@ -7,9 +7,18 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { pdftohtml } from "./xpdf";
 import { fs } from "zx";
-import { fp_regex } from "./fp_regex";
-import { pipe } from "fp-ts/lib/function";
-import { array, taskEither } from "fp-ts";
+import { fp_regex, fp_regex_exec_groups } from "./fp_regex";
+import { flow, pipe } from "fp-ts/lib/function";
+import { array, string, taskEither } from "fp-ts";
+import * as O from "fp-ts/Option";
+import * as TE from "fp-ts/TaskEither";
+import * as T from "fp-ts/Task";
+import * as E from "fp-ts/Either";
+import * as A from "fp-ts/array";
+import * as R from "fp-ts/record";
+import * as D from "io-ts/Decoder";
+import { fs as fpfs } from "fp-ts-node";
+import { either_unwrap, task_either_unwrap } from "./fp-validate";
 
 const fp_gt = (target: number) => (val: number) => val > target;
 const fp_lt = (target: number) => (val: number) => val < target;
@@ -76,31 +85,57 @@ console.log(try_infer_human_name("โอนไป LHBANK X6082 น.ส. กั�
 
 // process.exit(0);
 
-const pdf_file_path = process.argv[2] ?? "";
-assert(
-  pdf_file_path.endsWith(".pdf"),
-  "expect first argument to pass .pdf path"
-);
+const pdf_file_path = await pipe(
+  process.argv[2],
+  O.fromNullable,
+  E.fromOption(() => E.toError("expect in pass *.pdf as arguments")),
+  E.chain(
+    E.fromPredicate(string.endsWith(".pdf"), (x) =>
+      E.toError(`accpect only *.pdf got ${x}`)
+    )
+  ),
+  TE.fromEither,
+  TE.chain((a) =>
+    TE.tryCatch(() => fs.access(a, fs.constants.R_OK).then(() => a), E.toError)
+  ),
+  TE.getOrElse((err) => {
+    throw err;
+  })
+)();
+
+const fp_ensure_writable_empty_dir = async (outdir: string) => {
+  if (!path.isAbsolute(outdir)) {
+    throw new Error(`require absolute path, got ${outdir}`);
+  }
+  await fs.remove(outdir).catch(_.noop);
+  await fs.mkdir(outdir, { recursive: true });
+  await fs.ensureDir(outdir, fs.constants.W_OK);
+  return outdir;
+};
 
 const outdir = rpath("out/generate");
-await fs.remove(outdir).catch(() => {
-  console.log("[info] CANNOT REMOVE OUTDIR BECAUSE IT NO EXUST");
-});
-await fs
-  .mkdir(outdir, { recursive: true })
-  .then(() => console.log("mkdir success"));
-const out = pdftohtml({
-  pdf_path: pdf_file_path,
-  output_dir: path.resolve(outdir, "html"),
-})();
+const xpdfhtmls = await pipe(
+  pdftohtml({
+    pdf_path: pdf_file_path,
+    output_dir: path.resolve(
+      await fp_ensure_writable_empty_dir(outdir),
+      "html"
+    ),
+  }),
+  TE.getOrElse((err) => {
+    throw err;
+  })
+)();
 
 const REGEX_MONEY = /^\d{1,3}(,\d{3})*\.\d{2}$/;
 const REGEX_MONEY_STR = `\\d{1,3}(,\\d{3})*\\.\\d{2}`;
 const REGEX_TIME = /^[012]\d:[0123456]\d$/;
 const REGEX_DD_MM_YY = /^[0123]\d-[01]\d-\d\d$/;
 const REGEX_DD_MM_YYYY = /^[0123]\d\/[01]\d\/20\d\d$/;
+const REGEX_DD_MM_YYYY_STR = `[0123]\\d\\/[01]\\d\\/20\\d\\d`;
 const REGEX_TRANSACTION_DETAIL = /^(จาก|โอนไป)( .+)? X\d{4} .+$/;
 const REGEX_IS_STRING = /.+/;
+
 type Point = { x: number; y: number };
 type XPDFHtmlText = { text: string } & Point;
 
@@ -136,6 +171,7 @@ const parse_money = (money: string) => {
   assert(REGEX_MONEY.test(money), `money must in kbank format got ${money}`);
   return +money.replaceAll(",", "");
 };
+
 const is_รับโอนเงิน = (
   a: string
 ): a is "รับโอนเงิน" | "รับโอนเงินอัตโนมัติ" => {
@@ -251,24 +287,38 @@ let pages: {
   meta: Record<string, number | string>;
   data: ActualOutputRow[];
 }[] = [];
-for (const p of out.pages) {
-  const $ = cheerio.load(p.html_content);
-  let texts: XPDFHtmlText[] = $(".txt[style]")
-    .map((_, el) => {
-      const [, left, top] = fp_regex(
-        /^position:absolute; left:(\d+)px; top:(\d+)px;$/,
-        el.attribs.style
-      );
-      return {
-        x: parseInt(left),
-        y: parseInt(top),
-        text: $(el).text().trim(),
-      };
-    })
-    .toArray();
 
-  const x_freq = _.countBy(texts, (o) => o.x);
-  const y_freq = _.countBy(texts, (o) => o.y);
+async function parse_xpdfhtml(html: string) {
+  const texts = pipe(
+    cheerio.load(html),
+    ($) => $(".txt[style]").toArray(),
+    A.map((el) =>
+      pipe(
+        el.attribs.style,
+        fp_regex_exec_groups(
+          /^position:absolute; left:(?<x>\d+)px; top:(?<y>\d+)px;$/
+        ),
+        E.fromOption(
+          () =>
+            new Error(
+              `el.attribs.style not match ^position:absolute; left:(?<x>\\d+)px; top:(?<y>\\d+)px;`
+            )
+        ),
+        E.chainW(
+          flow(
+            R.map(parseInt),
+            ({ x, y }) => ({ x, y, text: cheerio.load(el).text().trim() }),
+            D.struct({ x: D.number, y: D.number, text: D.string }).decode,
+            E.mapLeft((err) => new Error(D.draw(err)))
+          )
+        )
+      )
+    ),
+    A.sequence(E.Applicative),
+    E.getOrElseW((err) => {
+      throw err;
+    })
+  );
 
   const REGEXS_HEADER = [
     [/^ที่ (?<uuid>[A-Z]{2}\.[0-9]{3} : [A-Z0-9]{22}\/25[0-9]{2})$/],
@@ -311,12 +361,277 @@ for (const p of out.pages) {
   ];
 
   let { headers, rows } = (() => {
-    const sorted_texts = _.sortBy(
-      texts,
-      ["y", "x"]
-      // (t) => t.y
-      // (t) => t.x
-    );
+    const sorted_texts = _.sortBy(texts, ["y", "x"]);
+    const row_header_idx = sorted_texts.findIndex((t, idx, arr) => {
+      if (t.text !== HEADER_CHECK[0].text) return;
+      // if (idx > 18 && idx < 22) {
+      //   console.log("TEST", idx, arr.slice(idx, idx + HEADER_CHECK.length));
+      //   let a = HEADER_CHECK;
+      //   let b = arr.slice(idx, idx + HEADER_CHECK.length);
+      //   console.log(a[0], b[0], k_check(a[0], b[0]));
+      // }
+
+      return k_check(HEADER_CHECK, arr.slice(idx, idx + HEADER_CHECK.length));
+    });
+
+    // console.log({ sorted_texts });
+    assert(row_header_idx !== -1, "must found header");
+    // console.log({ row_header_idx });
+    assert(isFinite(row_header_idx), "must able to font header row");
+
+    return {
+      headers: sorted_texts.slice(0, row_header_idx),
+      rows: sorted_texts
+        .slice(row_header_idx + HEADER_CHECK.length)
+        .reduce((acc: XPDFHtmlText[], itm) => {
+          // prettier-ignore
+          const new_x = _.findLast([
+                X_POS.date,
+                X_POS.time,
+                X_POS.transaction_name,
+                X_POS.amount,
+                X_POS.total,
+                X_POS.chanel,
+                X_POS.detail,
+              ], p => itm.x >= p);
+
+          // console.log("x", itm.x, new_x);
+          itm.x = new_x;
+          if (!_.isEmpty(acc)) {
+            const back = _.last(acc);
+            if (is_same_col(itm, back)) {
+              console.log(itm, acc);
+              // assumed mutiple line
+              //! mutate back
+              back.text += " " + itm.text;
+              return acc.slice();
+            } else {
+              return [...acc, itm];
+            }
+          }
+          return [...acc, itm];
+        }, []),
+    };
+  })();
+
+  let filtered_headers: Record<string, any> = {};
+
+  for (const regexs of REGEXS_HEADER) {
+    const n = regexs.length;
+    const i = _.range(headers.length)
+      .map((i) => headers.slice(i, i + n).map((t) => t.text))
+      .findIndex((strs) => k_check(regexs as any as RegExp[], strs));
+
+    if (i !== -1) {
+      //! mutable
+      const txts = headers.splice(i, n).map((t) => t.text);
+      for (const [txt, re] of _.zip(txts, regexs)) {
+        filtered_headers = {
+          ...filtered_headers,
+          ...re.exec(txt).groups,
+        };
+        console.log({ filtered_headers });
+      }
+    } else {
+      console.log("NOTFOUND", regexs, headers);
+    }
+  }
+  filtered_headers.page_current = +filtered_headers.page_current;
+  filtered_headers.page_total = +filtered_headers.page_total;
+  filtered_headers.address = [
+    filtered_headers.address_line_1,
+    filtered_headers.address_line_2,
+    filtered_headers.address_line_3,
+  ]
+    .filter(_.isString)
+    .join(" ")
+    .trim();
+  delete filtered_headers.address_line_1;
+  delete filtered_headers.address_line_2;
+  delete filtered_headers.address_line_3;
+
+  if (headers.length > 0) {
+    console.error("HEADERS not clean all", headers);
+  }
+  assert(headers.length == 0);
+
+  console.log({ filtered_headers, remain_header: headers });
+
+  // process.exit(0);
+
+  let actual_rows: ActualOutputRow[] = [];
+
+  let is_valid_head = false;
+  while (!_.isEmpty(rows)) {
+    if (
+      rows.length >= 3 &&
+      k_check(
+        [
+          { text: "สอบถามข้อมูลเพิ่มเติม" },
+          {
+            text: "บุคคลธรรมดา K Contact Center 02-8888888 นิติบุคคล K-BIZ Contact",
+          },
+          { text: "Center 02-8888822" },
+        ],
+        rows.slice(0, 3)
+      )
+    ) {
+      rows.splice(0, 3);
+      continue;
+    }
+    if (
+      rows.length == 1 &&
+      k_check([{ text: "ออกโดย K BIZ" }], rows.slice(0, 1))
+    ) {
+      rows.splice(0, 1);
+      continue;
+    }
+    if (
+      k_check(
+        [
+          { y: 247, x: X_POS.date, text: REGEX_DD_MM_YY },
+          { y: 247, x: X_POS.transaction_name, text: "ยอดยกมา" },
+          { y: 247, x: X_POS.total, text: REGEX_MONEY },
+        ],
+        rows.slice(0, 3)
+      )
+    ) {
+      is_valid_head = true;
+      actual_rows.push({
+        type: "carry",
+        date: rows[0].text,
+        transaction_name: "ยอดยกมา",
+        total: parse_money(rows[2].text),
+      });
+      rows.splice(0, 3);
+      continue;
+    }
+
+    assert(is_valid_head, "ต้องมี head ก่อนจะเริ่ม row");
+
+    if (
+      k_check(
+        [
+          { y: rows[0].y, x: X_POS.date, text: REGEX_DD_MM_YY },
+          { y: rows[0].y, x: X_POS.time, text: REGEX_TIME },
+          { y: rows[0].y, x: X_POS.transaction_name, text: is_รับโอนเงิน },
+          { y: rows[0].y, x: X_POS.amount, text: REGEX_MONEY },
+          { y: rows[0].y, x: X_POS.total, text: REGEX_MONEY },
+          { y: rows[0].y, x: X_POS.chanel, text: REGEX_IS_STRING },
+          { y: rows[0].y, x: X_POS.detail, text: REGEX_TRANSACTION_DETAIL },
+        ],
+        rows.slice(0, 7)
+      )
+    ) {
+      assert(is_รับโอนเงิน(rows[2].text), "ต้องหาร /^รับโอน.*/");
+      actual_rows.push({
+        type: "receive",
+        date: rows[0].text,
+        time: rows[1].text,
+        transaction_name: rows[2].text,
+        amount: parse_money(rows[3].text),
+        total: parse_money(rows[4].text),
+        chanel: rows[5].text,
+        detail: rows[6].text,
+      });
+      rows.splice(0, 7);
+      continue;
+    }
+    if (
+      k_check(
+        [
+          { y: rows[0].y, x: X_POS.date, text: REGEX_DD_MM_YY },
+          { y: rows[0].y, x: X_POS.time, text: REGEX_TIME },
+          { y: rows[0].y, x: X_POS.transaction_name, text: "โอนเงิน" },
+          { y: rows[0].y, x: X_POS.amount, text: REGEX_MONEY },
+          { y: rows[0].y, x: X_POS.total, text: REGEX_MONEY },
+          { y: rows[0].y, x: X_POS.chanel, text: REGEX_IS_STRING },
+          { y: rows[0].y, x: X_POS.detail, text: REGEX_TRANSACTION_DETAIL },
+        ],
+        rows.slice(0, 7)
+      )
+    ) {
+      actual_rows.push({
+        type: "payment",
+        date: rows[0].text,
+        time: rows[1].text,
+        transaction_name: "โอนเงิน",
+        amount: parse_money(rows[3].text),
+        total: parse_money(rows[4].text),
+        chanel: rows[5].text,
+        detail: rows[6].text,
+      });
+      rows.splice(0, 7);
+      continue;
+    }
+    console.error(rows);
+    throw new Error("row pattern ไม่ตรง");
+  }
+
+  pages.push({
+    meta: filtered_headers,
+    data: actual_rows,
+  });
+}
+
+for (const p of xpdfhtmls) {
+  const $ = cheerio.load(p.html_content);
+  let texts: XPDFHtmlText[] = $(".txt[style]")
+    .map((_, el) => {
+      const [, left, top] = fp_regex(
+        /^position:absolute; left:(\d+)px; top:(\d+)px;$/,
+        el.attribs.style
+      );
+      return {
+        x: parseInt(left),
+        y: parseInt(top),
+        text: $(el).text().trim(),
+      };
+    })
+    .toArray();
+
+  const REGEXS_HEADER = [
+    [/^ที่ (?<uuid>[A-Z]{2}\.[0-9]{3} : [A-Z0-9]{22}\/25[0-9]{2})$/],
+    [/^หน้าที่ (?<page_current>\d)\/(?<page_total>\d)\((?<page_id>\d{4})\)/],
+    [/^เลขที่อ้างอิง$/, /^(?<kbank_reference_id>\d{20})$/],
+    [/^เลขที่บัญชีเงินฝาก$/, /^(?<account_id_censor>XXX-X-XX\d{3}-\d)$/],
+    [
+      /^รอบระหว่างวันที่$/,
+      /^(?<date_begin>[0123]\d\/[01]\d\/20\d\d) - (?<date_end>[0123]\d\/[01]\d\/20\d\d)$/,
+    ],
+    [/^สาขาเจ้าของบัญชี$/, /^(?<account_location>สาขา.+)$/],
+    [/^ยอดยกไป$/, new RegExp(`^(?<summary_total>${REGEX_MONEY_STR})$`)],
+    [
+      /^รวมถอนเงิน (?<summary_payment_count>\d+) รายการ$/,
+      new RegExp(`^(?<summary_payment_money>${REGEX_MONEY_STR})$`),
+    ],
+    [
+      /^รวมฝากเงิน (?<summary_receive_count>\d+) รายการ$/,
+      new RegExp(`^(?<summary_receive_money>${REGEX_MONEY_STR})$`),
+    ],
+    [/^ชื่อบัญชี (?<account_name>.+)$/],
+    [
+      /^(?<address_line_1>.+)$/,
+      /^(?<address_line_2>.+)$/,
+      /^(?<address_line_3>.+)$/,
+    ],
+    [/^(?<address_line_1>.+)$/, /^(?<address_line_2>.+)$/],
+    [/^(?<address_line_1>.+)$/],
+  ] as const;
+
+  const HEADER_CHECK: XPDFHtmlText[] = [
+    { x: 82, y: 213, text: "เวลา/" },
+    { x: 52, y: 220, text: "วันที่" },
+    { x: 138, y: 220, text: "รายการ" },
+    { x: 211, y: 220, text: "ถอนเงิน / ฝากเงิน" },
+    { x: 299, y: 220, text: "ยอดคงเหลือ" },
+    { x: 379, y: 220, text: "ช่องทาง" },
+    { x: 481, y: 220, text: "รายละเอียด" },
+    { x: 77, y: 226, text: "วันที่มีผล" },
+  ];
+
+  let { headers, rows } = (() => {
+    const sorted_texts = _.sortBy(texts, ["y", "x"]);
     const row_header_idx = sorted_texts.findIndex((t, idx, arr) => {
       if (t.text !== HEADER_CHECK[0].text) return;
       // if (idx > 18 && idx < 22) {

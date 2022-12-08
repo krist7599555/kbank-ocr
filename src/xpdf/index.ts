@@ -7,6 +7,7 @@ import {
   ord,
   number,
   taskEither as TE,
+  task as T,
   either as E,
   record as R,
   option as O,
@@ -85,48 +86,17 @@ export const pdftohtml = (opt: {
 }) =>
   pipe(
     // prettier-ignore
-    TE.tryCatch(() => $`pdftohtml -r ${opt.resolution ?? 150} -table -formfields ${opt.pdf_path} ${opt.output_dir}`, E.toError),
+    TE.tryCatch(() => 
+      $`pdftohtml -r ${opt.resolution ?? 150} -table -formfields ${opt.pdf_path} ${opt.output_dir}`, E.toError),
     TE.chain(() => TE.tryCatch(() => fs.readdir(opt.output_dir), E.toError)),
-    TE.map((o) =>
+    TE.chain((filenames) =>
       pipe(
-        o,
-        //
+        filenames,
         A.map((filename) => path.resolve(opt.output_dir, filename)),
         A.filter(string.endsWith(".html")),
         A.filter((s) => !s.includes("index.html")),
-        A.traverse(TE.ApplicativePar)((o) => read_pdftohtml_output(o)),
-        // TE.chain((a) => a),
-        (o) => o
+        A.traverse(TE.ApplicativePar)((file) => read_pdftohtml_output(file)),
+        TE.mapLeft(E.toError)
       )
-    ),
-    (o) => o,
-    // TE.sequenceArray(TE.ApplicativePar),
-    // A.sequence(TE.ApplicativePar),
-    (o) => o
+    )
   );
-//   const _out = await $`pdftohtml -r ${
-//     opt.resolution ?? 150
-//   } -table -formfields ${opt.pdf_path} ${opt.output_dir}`;
-
-//   return pipe(
-//     await fs.readdir(opt.output_dir),
-//     array.map((filename) => path.resolve(opt.output_dir, filename)),
-//     array.filter(string.endsWith(".html")),
-//     array.filter((s) => !s.includes("index.html")),
-//     array.map((html_path) => {
-//       const [, page] = fp_regex(/page(\d+).html$/, html_path);
-//       return async () => ({
-//         page: +page,
-//         html_path,
-//         html_content: (await fs.readFile(html_path)).toString("utf-8"),
-//       });
-//     }),
-//     array.sequence(task.ApplicativePar),
-//     task.map((arr) =>
-//       array.sortBy([
-//         ord.contramap((p: { page: number }) => p.page)(number.Ord),
-//       ])(arr)
-//     ),
-//     task.map((o) => ({ pages: o }))
-//   )();
-// }

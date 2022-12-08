@@ -6,6 +6,7 @@ specifiers:
   cheerio: 1.0.0-rc.12
   fp-ts: ^2.13.1
   fp-ts-node: ^6.0.0
+  io-ts: ^2.2.20
   json-as-xlsx: ^2.4.6
   lodash: ^4.17.21
   tsx: ^3.12.1
@@ -17,6 +18,7 @@ dependencies:
   cheerio: 1.0.0-rc.12
   fp-ts: 2.13.1
   fp-ts-node: 6.0.0_7gtini43pzmz5mhrsya7m7yz5i
+  io-ts: 2.2.20_fp-ts@2.13.1
   json-as-xlsx: 2.4.6
   lodash: 4.17.21
   zx: 7.1.1
@@ -586,6 +588,14 @@ packages:
   /ignore/5.2.1:
     resolution: {integrity: sha512-d2qQLzTJ9WxQftPAuEQpSPmKqzxePjzVbpAVv62AQ64NTL+wR4JkrVqR/LqFsFEUsHDAiId52mJteHDFuDkElA==}
     engines: {node: '>= 4'}
+    dev: false
+
+  /io-ts/2.2.20_fp-ts@2.13.1:
+    resolution: {integrity: sha512-Rq2BsYmtwS5vVttie4rqrOCIfHCS9TgpRLFpKQCM1wZBBRY9nWVGmEvm2FnDbSE2un1UE39DvFpTR5UL47YDcA==}
+    peerDependencies:
+      fp-ts: ^2.5.0
+    dependencies:
+      fp-ts: 2.13.1
     dev: false
 
   /is-extglob/2.1.1:
