@@ -10,6 +10,7 @@ specifiers:
   json-as-xlsx: ^2.4.6
   lodash: ^4.17.21
   tsx: ^3.12.1
+  type-fest: ^3.3.0
   typescript: ^4.9.3
   zx: ^7.1.1
 
@@ -26,6 +27,7 @@ dependencies:
 devDependencies:
   '@types/node': 18.11.10
   tsx: 3.12.1
+  type-fest: 3.3.0
   typescript: 4.9.3
 
 packages:
@@ -786,6 +788,11 @@ packages:
       '@esbuild-kit/esm-loader': 2.5.4
     optionalDependencies:
       fsevents: 2.3.2
+    dev: true
+
+  /type-fest/3.3.0:
+    resolution: {integrity: sha512-gezeeOIZyQLGW5uuCeEnXF1aXmtt2afKspXz3YqoOcZ3l/YMJq1pujvgT+cz/Nw1O/7q/kSav5fihJHsC/AOUg==}
+    engines: {node: '>=14.16'}
     dev: true
 
   /typescript/4.9.3:
