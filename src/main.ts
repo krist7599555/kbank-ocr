@@ -377,6 +377,13 @@ const fp_array_extract_regexs =
   };
 
 function parse_xpdfhtml_head(head: XPDFHtmlText[]): Record<string, any> {
+  const { left: column_left, right: column_right } = pipe(
+    head,
+    A.partition((p) => p.x >= 346)
+  );
+
+  console.log({ column_left, column_right });
+
   let out = pipe(
     head,
     A.map((o) => o.text),
