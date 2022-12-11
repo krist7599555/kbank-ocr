@@ -5,7 +5,7 @@
   "type": "module",
   "module": "2022",
   "scripts": {
-    "run:pdf": "tsx ./src/main.ts ./private/STM.pdf"
+    "start": "tsx --experimental-specifier-resolution=node ./src/main.ts ./private/STM.pdf"
   },
   "keywords": [],
   "author": "",

@@ -382,7 +382,64 @@ function parse_xpdfhtml_head(head: XPDFHtmlText[]): Record<string, any> {
     A.partition((p) => p.x >= 346)
   );
 
-  console.log({ column_left, column_right });
+  // console.log({ column_left, column_right });
+
+  const right_column = pipe(
+    column_right,
+    A.chop((xs) => {
+      return pipe(
+        xs,
+        A.spanLeft((x) => x.y == xs[0].y),
+        ({ init, rest }) => [
+          pipe(
+            init,
+            A.map((o) => o.text)
+          ),
+          rest,
+        ]
+      );
+    }),
+    A.map((xs) => {
+      return pipe(
+        [
+          [/^เลขที่อ้างอิง$/, /^(?<kbank_reference_id>\d{20})$/],
+          [/^เลขที่บัญชีเงินฝาก$/, /^(?<account_id_censor>XXX-X-XX\d{3}-\d)$/],
+          [
+            /^รอบระหว่างวันที่$/,
+            /^(?<date_begin>[0123]\d\/[01]\d\/20\d\d) - (?<date_end>[0123]\d\/[01]\d\/20\d\d)$/,
+          ],
+          [/^สาขาเจ้าของบัญชี$/, /^(?<account_location>สาขา.+)$/],
+          [/^ยอดยกไป$/, new RegExp(`^(?<summary_total>${REGEX_MONEY_STR})$`)],
+          [
+            /^รวมถอนเงิน (?<summary_payment_count>\d+) รายการ$/,
+            new RegExp(`^(?<summary_payment_money>${REGEX_MONEY_STR})$`),
+          ],
+          [
+            /^รวมฝากเงิน (?<summary_receive_count>\d+) รายการ$/,
+            new RegExp(`^(?<summary_receive_money>${REGEX_MONEY_STR})$`),
+          ],
+        ],
+        A.findFirstMap((re) =>
+          pipe(
+            A.zipWith(re, xs, (rei, xsi) =>
+              O.fromNullable(rei.exec(xsi)?.groups)
+            ),
+            A.sequence(O.Applicative),
+            O.map(
+              A.reduce({} as Record<string, string>, (a, b) =>
+                Object.assign(a, b)
+              )
+            ),
+            (o) => o
+          )
+        ),
+        (o) => o
+      );
+    })
+  );
+
+  console.log(right_column);
+  return O.none;
 
   let out = pipe(
     head,
